@@ -1,0 +1,89 @@
+{
+  "mode": "manual-console",
+  "browserMode": "headful",
+  "targetUrl": "https://www.cityline.com/zh_CN/Events.html",
+  "timestamp": "2026-04-22T08:50:36.490Z",
+  "requestHeaders": {
+    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "accept-language": "zh-CN,zh;q=0.9,en;q=0.8,ar;q=0.7",
+    "cache-control": "max-age=0",
+    "cookie": "org.springframework.web.servlet.i18n.CookieLocaleResolver.LOCALE=zh_CN; cl-font-size=16px; cl-theme-color=default; _pubcid=b28049fc-418a-4b56-ad21-cdc7029716db; CL_uid=30224580; CL_ccb=true; _cc_id=a065658306c4b3991f7fa589d41e0698; panoramaId_expiry=1776910661595; panoramaId=130764179a9ac42c43052ea3049f4945a70268a99b6c046a25e06075b7e92edc; panoramaIdType=panoIndiv; _gid=GA1.2.1597069347.1776671221; g_state={\"i_l\":0,\"i_ll\":1776676908351,\"i_e\":{\"enable_itp_optimization\":22},\"i_et\":1776342875481}; CL_TK=7501a1dc9b9946e1390ba20ae12ca83755e4504dfe97219b6d7b36dd417d5c8d|c3acd3bddcde3a8d|f94b3067efe2acb0c919f81bc41385bf78d71f64d48677ab|ebe1d5941a1a8692944fd1cc12f906b17db33e27; cto_bidid=sK5YeV91V25zazRWczd5TzViZ2lOQjNjak44YjNNTXJoNDU5YU9NZ0RiZWk2dXlOZExJTWhqREcySXg5ZVZBaHpiJTJGNUR6ZTcyeVNHUHhyR29rbzU2Y1V0cENDMXVIVCUyQlF1Q25yNEluemVkRnNoZVFNS3owSm1ZdnJpNW1uNEpQMlRKUU5ac2lSMHZxbVZ6aldiOG9IUU90bmlnJTNEJTNE; _ga_BXVNCXVY23=GS2.1.s1776676976$o1$g1$t1776676991$j45$l0$h0; _gcl_au=1.1.1415169430.1776827484; _ga_K0T1R01WMW=GS2.1.s1776838027$o10$g0$t1776838027$j60$l0$h0; _ga_3DXLK9N5DR=GS2.1.s1776838027$o11$g0$t1776838027$j60$l0$h0; lang=CN; _ga_0M1K5NPYZE=GS2.1.s1776842640$o12$g1$t1776842643$j57$l0$h0; _ga_BD9VNGC0M6=GS2.1.s1776842640$o12$g1$t1776842643$j57$l0$h0; _ga=GA1.2.569722953.1774937351; AWSALB=UclSlL1Wshdpo5VTCSu0a1pWW7v/b9+lrrOHDJYw+YlBV/y8udKzEkuzXRhlPzPbGye+DtIiez/LytwsKa6I7cG0K0PkADkONN1UUbeIGgCBtJEbRb9xBK5aKorm; CLSID=C4D99B7ABBD2F4229D101A26A7C55530; FCCDCF=%5Bnull%2Cnull%2Cnull%2Cnull%2Cnull%2Cnull%2C%5B%5B32%2C%22%5B%5C%222908bfa1-8d85-4cf7-af0e-f221a24b8a3b%5C%22%2C%5B1774937279%2C935000000%5D%5D%22%5D%5D%5D; cto_bundle=rJxeYl9PZjRLR3BFbWV6VDFLQ1NTQmlIeDBWTGNQckJLNDJrSFJuQ0oySHlmR1NHdmFDQkJjMGlVQlklMkJlcVhiVGJwOFB2c2ZLN0ZwemE1d2tRdzl6S2tvSG91d0lxVWR3JTJCNFZoQzVWNnMlMkZwdndSdkY5czlSVVo2SkY3S2NvTFBkd1E0a1dMMHpnVEpyQ2hCaHhXcTJGWVl2anFBSUpPYkxxSVBJY1RMNEozU3lCeGs1TXlPSktyUndrcGJXQmtqYyUyQlYlMkZB; __gads=ID=1cf3e4c1ace9fe8f:T=1774937280:RT=1776842702:S=ALNI_Mb9u_jII24UXifVQYTc6Eu0vxkbUw; __gpi=UID=00001235cd08adce:T=1774937280:RT=1776842702:S=ALNI_MafWQBbGE-8i2VFhl-4eQLvel1U7A; __eoi=ID=b10205997941343c:T=1774937280:RT=1776842702:S=AA-AfjYQU1fvDLSVwo6XZ4MM5QEB; FCNEC=%5B%5B%22AKsRol806po9mOO5R0PGEpkvNtzNQCqCpYPskAS22PpPKtsXySuhdkS4a5dzTJKPJ9E0s5u5vwORFhzNigL-eMx1OfeJKfzqLRkCSBOPwVT2Y4RSp6yHNaPqvmkajLmc01OmA8MJH7RfXtpfWfDipgco2Su87SP9cw%3D%3D%22%5D%5D; cto_bundle=rJxeYl9PZjRLR3BFbWV6VDFLQ1NTQmlIeDBWTGNQckJLNDJrSFJuQ0oySHlmR1NHdmFDQkJjMGlVQlklMkJlcVhiVGJwOFB2c2ZLN0ZwemE1d2tRdzl6S2tvSG91d0lxVWR3JTJCNFZoQzVWNnMlMkZwdndSdkY5czlSVVo2SkY3S2NvTFBkd1E0a1dMMHpnVEpyQ2hCaHhXcTJGWVl2anFBSUpPYkxxSVBJY1RMNEozU3lCeGs1TXlPSktyUndrcGJXQmtqYyUyQlYlMkZB; aws-waf-token=11da18b4-00f9-4353-8296-1428e85cbc64:AQoAoPc9aM4fAAAA:YJn/Pl1tpoKiYnwUjgjfHiEcv71LioZ+MWaosoDBaJRxuNKD3biPflKiBECWTozFXQxr/zbZz9W961quiM4G6YwEQPO1cYz82jGvdB4WhYfr2GiKqGlitfAMNt4WqNvHpym9rM5s0pX2w9CCv7T8To0LM4HVrAj4UnFoLWLQCvcfzU0LdLNYgA9eZG/tdThQTWIbEGkCCRk30UxBQr/BCQXiBy/vUHc2kObCpOwX2Vuk6LHP4xiwqlR1WIwPX2mbePuLoRzLFQ==",
+    "if-modified-since": "Thu, 19 Mar 2026 16:02:59 GMT",
+    "if-none-match": "W/\"74b0406fff19e201e95cc19aa6fc6cae\"",
+    "priority": "u=0, i",
+    "referer": "https://venue.cityline.com/",
+    "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": "\"macOS\"",
+    "sec-fetch-dest": "document",
+    "sec-fetch-mode": "navigate",
+    "sec-fetch-site": "same-origin",
+    "sec-fetch-user": "?1",
+    "upgrade-insecure-requests": "1",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+  },
+  "result": {
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+    "platform": "MacIntel",
+    "vendor": "Google Inc.",
+    "language": "zh-CN",
+    "languages": [
+      "zh-CN",
+      "zh",
+      "en",
+      "ar"
+    ],
+    "hardwareConcurrency": 8,
+    "webdriver": false,
+    "pluginsLength": 5,
+    "plugins": [
+      {
+        "name": "PDF Viewer",
+        "filename": "internal-pdf-viewer",
+        "description": "Portable Document Format"
+      },
+      {
+        "name": "Chrome PDF Viewer",
+        "filename": "internal-pdf-viewer",
+        "description": "Portable Document Format"
+      },
+      {
+        "name": "Chromium PDF Viewer",
+        "filename": "internal-pdf-viewer",
+        "description": "Portable Document Format"
+      },
+      {
+        "name": "Microsoft Edge PDF Viewer",
+        "filename": "internal-pdf-viewer",
+        "description": "Portable Document Format"
+      },
+      {
+        "name": "WebKit built-in PDF",
+        "filename": "internal-pdf-viewer",
+        "description": "Portable Document Format"
+      }
+    ],
+    "mimeTypesLength": 2,
+    "mimeTypes": [
+      {
+        "type": "application/pdf",
+        "suffixes": "pdf",
+        "description": "Portable Document Format"
+      },
+      {
+        "type": "text/pdf",
+        "suffixes": "pdf",
+        "description": "Portable Document Format"
+      }
+    ],
+    "webglVendor": null,
+    "webglRenderer": null,
+    "hasChrome": true,
+    "chromeRuntimeExists": false,
+    "chromeAppExists": true,
+    "outerWidth": 1920,
+    "outerHeight": 1055,
+    "innerWidth": 1346,
+    "innerHeight": 968
+  }
+}

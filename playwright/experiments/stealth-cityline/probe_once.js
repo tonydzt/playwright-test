@@ -6,8 +6,11 @@ const stealth = require('puppeteer-extra-plugin-stealth');
 const useStealth = process.argv.includes('--stealth');
 const useHeadful = process.argv.includes('--headful');
 const outputArg = process.argv.find((arg) => arg.startsWith('--out='));
+const recipeArg = process.argv.find((arg) => arg.startsWith('--recipe='));
 const outputFile = outputArg ? outputArg.slice('--out='.length) : null;
+const recipeFile = recipeArg ? recipeArg.slice('--recipe='.length) : null;
 const targetUrl = 'https://www.cityline.com/zh_CN/Events.html';
+const recipe = recipeFile ? JSON.parse(fs.readFileSync(path.resolve(recipeFile), 'utf8')) : null;
 
 if (useStealth) {
   chromium.use(stealth());
@@ -15,8 +18,17 @@ if (useStealth) {
 
 async function run() {
   const browser = await chromium.launch({ headless: !useHeadful });
-  const context = await browser.newContext();
+  const context = await browser.newContext((recipe && recipe.contextOptions) || {});
+  if (recipe && Array.isArray(recipe.initScripts)) {
+    for (const script of recipe.initScripts) {
+      await context.addInitScript(script);
+    }
+  }
   const page = await context.newPage();
+  if (recipe && recipe.cdpUserAgentOverride) {
+    const client = await context.newCDPSession(page);
+    await client.send('Network.setUserAgentOverride', recipe.cdpUserAgentOverride);
+  }
 
   let mainRequestHeaders = null;
   let mainNavigationRequest = null;
@@ -33,8 +45,11 @@ async function run() {
       const attempt = i % 2 === 0
         ? { waitUntil: 'domcontentloaded', timeout: 30000 }
         : { waitUntil: 'commit', timeout: 30000 };
+      const finalAttempt = recipe && recipe.gotoOptions
+        ? { ...attempt, ...recipe.gotoOptions }
+        : attempt;
       try {
-        await page.goto(targetUrl, attempt);
+        await page.goto(targetUrl, finalAttempt);
         const currentUrl = page.url();
         if (currentUrl.startsWith('chrome-error://')) {
           lastError = new Error(`Navigation landed on error page: ${currentUrl}`);
@@ -158,7 +173,7 @@ async function run() {
   const result = await collectResultWithRetry();
 
   const payload = {
-    mode: useStealth ? 'stealth' : 'baseline',
+    mode: (recipe && recipe.modeLabel) || (useStealth ? 'stealth' : 'baseline'),
     browserMode: useHeadful ? 'headful' : 'headless',
     targetUrl,
     timestamp: new Date().toISOString(),

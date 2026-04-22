@@ -11,7 +11,11 @@ const generatedResultFiles = [
   'no-stealth.json',
   'stealth-run-1.json',
   'stealth-run-2.json',
-  'stealth-headful-run-1.json'
+  'stealth-headful-run-1.json',
+  'stealth-recommended-headless-run-1.json',
+  'stealth-recommended-headful-run-1.json',
+  'recommended-headless-recipe.json',
+  'recommended-headful-recipe.json'
 ];
 
 function runProbe(args) {
@@ -75,7 +79,7 @@ function renderHtmlTable(rows) {
         ? `<td rowspan="${list.length}" class="config-cell"><code>${escapeHtml(configItem)}</code></td>`
         : '';
       trs.push(
-        `<tr>${configCell}<td><code>${escapeHtml(r.item)}</code></td><td><pre class="value-block">${escapeHtml(r.baseline)}</pre></td><td><pre class="value-block">${escapeHtml(r.stealth)}</pre></td><td><pre class="value-block">${escapeHtml(r.headfulStealth)}</pre></td><td><pre class="value-block">${escapeHtml(r.manualRef)}</pre></td><td><pre class="value-block">${escapeHtml(r.configValue)}</pre></td><td>${renderBooleanIcon(r.effectChanged, '生效', '未生效')}</td><td>${renderBooleanIcon(r.isFixed, '固定', '随机')}</td><td>${renderDiffIcon(r.headfulDiff)}</td><td>${renderDiffIcon(r.manualDiff)}</td></tr>`
+        `<tr>${configCell}<td><code>${escapeHtml(r.item)}</code></td><td><pre class="value-block">${escapeHtml(r.baseline)}</pre></td><td><pre class="value-block">${escapeHtml(r.stealth)}</pre></td><td><pre class="value-block">${escapeHtml(r.headfulStealth)}</pre></td><td><pre class="value-block">${escapeHtml(r.recommendedHeadless)}</pre></td><td><pre class="value-block">${escapeHtml(r.recommendedHeadful)}</pre></td><td><pre class="value-block">${escapeHtml(r.manualRef)}</pre></td><td><pre class="value-block">${escapeHtml(r.configValue)}</pre></td><td>${renderBooleanIcon(r.effectChanged, '生效', '未生效')}</td><td>${renderBooleanIcon(r.isFixed, '固定', '随机')}</td><td>${renderDiffIcon(r.headfulDiff)}</td><td>${renderDiffIcon(r.manualDiff)}</td><td>${renderDiffIcon(r.recommendedHeadlessManualDiff)}</td><td>${renderDiffIcon(r.recommendedHeadfulManualDiff)}</td></tr>`
       );
     });
   }
@@ -89,12 +93,16 @@ function renderHtmlTable(rows) {
         <th>no-stealth</th>
         <th>stealth(run1)</th>
         <th>headful-stealth(run1)</th>
+        <th>recommended-headless(run1)</th>
+        <th>recommended-headful(run1)</th>
         <th>manual基准</th>
         <th>配置值(观测)</th>
         <th>生效判断</th>
         <th>固定/随机</th>
         <th>headful差异</th>
-        <th>manual差异</th>
+        <th>manual差异(原有头)</th>
+        <th>manual差异(推荐无头)</th>
+        <th>manual差异(推荐有头)</th>
       </tr>
     </thead>
     <tbody>
@@ -126,7 +134,7 @@ function renderCategoryTables(rows) {
     .join('\n');
 }
 
-function buildSuggestions(sampleName, sampleSource, manualBaseline, isHeadless) {
+function buildAlignmentPlan(sampleSource, manualBaseline, isHeadless) {
   const manualHeaders = manualBaseline?.requestHeaders || {};
   const sampleHeaders = sampleSource?.requestHeaders || {};
   const manualResult = manualBaseline?.result || {};
@@ -234,23 +242,54 @@ WebGLRenderingContext.prototype.getParameter = function(param) {
     contextOptions.extraHTTPHeaders = extraHTTPHeaders;
   }
 
-  const contextOptionsText = JSON.stringify(contextOptions, null, 2);
-  const cdpText = needsCDPOverride
+  const cdpUserAgentOverride = needsCDPOverride
+    ? {
+        userAgent: contextOptions.userAgent || manualHeaders['user-agent'] || '',
+        acceptLanguage: manualHeaders['accept-language'] || ''
+      }
+    : null;
+
+  const gotoOptions = {};
+  if (diffKeys.has('requestHeaders.referer') && manualHeaders.referer) {
+    gotoOptions.referer = manualHeaders.referer;
+  }
+
+  return {
+    diffCount: diffs.length,
+    contextOptions,
+    cdpUserAgentOverride,
+    initScripts: initScriptLines,
+    gotoOptions,
+    notes,
+    cannotAutoAlign,
+    isHeadless
+  };
+}
+
+function buildSuggestions(sampleName, sampleSource, manualBaseline, isHeadless) {
+  const plan = buildAlignmentPlan(sampleSource, manualBaseline, isHeadless);
+
+  const contextOptionsText = JSON.stringify(plan.contextOptions, null, 2);
+  const cdpText = plan.cdpUserAgentOverride
     ? `
 const client = await context.newCDPSession(page);
 await client.send('Network.setUserAgentOverride', {
-  userAgent: ${JSON.stringify(contextOptions.userAgent || manualHeaders['user-agent'] || '')},
-  acceptLanguage: ${JSON.stringify(manualHeaders['accept-language'] || '')}
+  userAgent: ${JSON.stringify(plan.cdpUserAgentOverride.userAgent)},
+  acceptLanguage: ${JSON.stringify(plan.cdpUserAgentOverride.acceptLanguage)}
 });
 `.trim()
     : '';
 
-  const initText = initScriptLines.length
+  const initText = plan.initScripts.length
     ? `
 await context.addInitScript(() => {
-  ${initScriptLines.join('\n  ')}
+  ${plan.initScripts.join('\n  ')}
 });
 `.trim()
+    : '';
+
+  const gotoOptionsText = plan.gotoOptions && Object.keys(plan.gotoOptions).length
+    ? `, ${JSON.stringify(plan.gotoOptions, null, 2).slice(1, -1).trim()}`
     : '';
 
   const snippet = `
@@ -260,48 +299,60 @@ const context = await browser.newContext(${contextOptionsText});
 const page = await context.newPage();
 ${cdpText}
 ${initText}
-await page.goto('https://www.cityline.com/zh_CN/Events.html', { waitUntil: 'domcontentloaded' });
+await page.goto('https://www.cityline.com/zh_CN/Events.html', { waitUntil: 'domcontentloaded'${gotoOptionsText} });
 `.trim();
 
   return {
-    diffCount: diffs.length,
+    diffCount: plan.diffCount,
     snippet,
-    notes,
-    cannotAutoAlign
+    notes: plan.notes,
+    cannotAutoAlign: plan.cannotAutoAlign,
+    plan
   };
 }
 
-function generateReport(baseline, stealth1, stealth2, headfulStealth, manualBaseline) {
+function generateReport(
+  baseline,
+  stealth1,
+  stealth2,
+  headfulStealth,
+  recommendedHeadless,
+  recommendedHeadful,
+  manualBaseline,
+  headlessSuggest,
+  headfulSuggest
+) {
   const getByPath = (source, key) => {
+    const safeSource = source || { requestHeaders: {}, result: {} };
     if (key.startsWith('requestHeaders.')) {
       const headerKey = key.slice('requestHeaders.'.length);
-      return source.requestHeaders?.[headerKey];
+      return safeSource.requestHeaders?.[headerKey];
     }
-    if (key === 'requestHeaders.user-agent') return source.requestHeaders?.['user-agent'];
-    if (key === 'requestHeaders.sec-ch-ua') return source.requestHeaders?.['sec-ch-ua'];
-    if (key === 'requestHeaders.sec-ch-ua-platform') return source.requestHeaders?.['sec-ch-ua-platform'];
-    if (key === 'requestHeaders.sec-ch-ua-mobile') return source.requestHeaders?.['sec-ch-ua-mobile'];
-    if (key === 'requestHeaders.accept-language') return source.requestHeaders?.['accept-language'];
-    if (key === 'result.userAgent') return source.result.userAgent;
-    if (key === 'result.platform') return source.result.platform;
-    if (key === 'result.language') return source.result.language;
-    if (key === 'result.webdriver') return source.result.webdriver;
-    if (key === 'result.pluginsLength') return source.result.pluginsLength;
-    if (key === 'result.plugins') return source.result.plugins;
-    if (key === 'result.mimeTypesLength') return source.result.mimeTypesLength;
-    if (key === 'result.mimeTypes') return source.result.mimeTypes;
-    if (key === 'result.hardwareConcurrency') return source.result.hardwareConcurrency;
-    if (key === 'result.languages') return source.result.languages;
-    if (key === 'result.webglVendor') return source.result.webglVendor;
-    if (key === 'result.webglRenderer') return source.result.webglRenderer;
-    if (key === 'result.chromeRuntimeExists') return source.result.chromeRuntimeExists;
-    if (key === 'result.chromeAppExists') return source.result.chromeAppExists;
-    if (key === 'result.hasChrome') return source.result.hasChrome;
-    if (key === 'result.vendor') return source.result.vendor;
-    if (key === 'result.outerWidth') return source.result.outerWidth;
-    if (key === 'result.outerHeight') return source.result.outerHeight;
-    if (key === 'result.innerWidth') return source.result.innerWidth;
-    if (key === 'result.innerHeight') return source.result.innerHeight;
+    if (key === 'requestHeaders.user-agent') return safeSource.requestHeaders?.['user-agent'];
+    if (key === 'requestHeaders.sec-ch-ua') return safeSource.requestHeaders?.['sec-ch-ua'];
+    if (key === 'requestHeaders.sec-ch-ua-platform') return safeSource.requestHeaders?.['sec-ch-ua-platform'];
+    if (key === 'requestHeaders.sec-ch-ua-mobile') return safeSource.requestHeaders?.['sec-ch-ua-mobile'];
+    if (key === 'requestHeaders.accept-language') return safeSource.requestHeaders?.['accept-language'];
+    if (key === 'result.userAgent') return safeSource.result.userAgent;
+    if (key === 'result.platform') return safeSource.result.platform;
+    if (key === 'result.language') return safeSource.result.language;
+    if (key === 'result.webdriver') return safeSource.result.webdriver;
+    if (key === 'result.pluginsLength') return safeSource.result.pluginsLength;
+    if (key === 'result.plugins') return safeSource.result.plugins;
+    if (key === 'result.mimeTypesLength') return safeSource.result.mimeTypesLength;
+    if (key === 'result.mimeTypes') return safeSource.result.mimeTypes;
+    if (key === 'result.hardwareConcurrency') return safeSource.result.hardwareConcurrency;
+    if (key === 'result.languages') return safeSource.result.languages;
+    if (key === 'result.webglVendor') return safeSource.result.webglVendor;
+    if (key === 'result.webglRenderer') return safeSource.result.webglRenderer;
+    if (key === 'result.chromeRuntimeExists') return safeSource.result.chromeRuntimeExists;
+    if (key === 'result.chromeAppExists') return safeSource.result.chromeAppExists;
+    if (key === 'result.hasChrome') return safeSource.result.hasChrome;
+    if (key === 'result.vendor') return safeSource.result.vendor;
+    if (key === 'result.outerWidth') return safeSource.result.outerWidth;
+    if (key === 'result.outerHeight') return safeSource.result.outerHeight;
+    if (key === 'result.innerWidth') return safeSource.result.innerWidth;
+    if (key === 'result.innerHeight') return safeSource.result.innerHeight;
     return undefined;
   };
 
@@ -354,6 +405,8 @@ function generateReport(baseline, stealth1, stealth2, headfulStealth, manualBase
     const stealthValue = getByPath(stealth1, item);
     const stealth2Value = getByPath(stealth2, item);
     const headfulValue = getByPath(headfulStealth, item);
+    const recommendedHeadlessValue = getByPath(recommendedHeadless, item);
+    const recommendedHeadfulValue = getByPath(recommendedHeadful, item);
     const manualValue = getByPath(
       manualBaseline || { requestHeaders: {}, result: {} },
       item
@@ -365,6 +418,8 @@ function generateReport(baseline, stealth1, stealth2, headfulStealth, manualBase
       baseline: formatValue(baselineValue),
       stealth: formatValue(stealthValue),
       headfulStealth: formatValue(headfulValue),
+      recommendedHeadless: formatValue(recommendedHeadlessValue),
+      recommendedHeadful: formatValue(recommendedHeadfulValue),
       manualRef: formatValue(manualValue),
       configValue: formatValue(stealthValue),
       effectChanged: !valueEqual(baselineValue, stealthValue),
@@ -372,7 +427,13 @@ function generateReport(baseline, stealth1, stealth2, headfulStealth, manualBase
       headfulDiff: !valueEqual(stealthValue, headfulValue),
       manualDiff: typeof manualValue === 'undefined'
         ? false
-        : !valueEqual(headfulValue, manualValue)
+        : !valueEqual(headfulValue, manualValue),
+      recommendedHeadlessManualDiff: typeof manualValue === 'undefined'
+        ? false
+        : !valueEqual(recommendedHeadlessValue, manualValue),
+      recommendedHeadfulManualDiff: typeof manualValue === 'undefined'
+        ? false
+        : !valueEqual(recommendedHeadfulValue, manualValue)
     };
   });
 
@@ -381,9 +442,6 @@ function generateReport(baseline, stealth1, stealth2, headfulStealth, manualBase
     { requestHeaders: stealth2.requestHeaders, result: stealth2.result }
   );
   const randomConclusion = deterministic ? '一致（确定性）' : '不一致（存在随机性）';
-  const headlessSuggest = buildSuggestions('stealth(run1)', stealth1, manualBaseline, true);
-  const headfulSuggest = buildSuggestions('headful-stealth(run1)', headfulStealth, manualBaseline, false);
-
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -431,7 +489,8 @@ function generateReport(baseline, stealth1, stealth2, headfulStealth, manualBase
     }
     .table-wrap {
       margin-top: 10px;
-      overflow-x: auto;
+      overflow: auto;
+      max-height: 68vh;
       border: 1px solid var(--line);
       border-radius: 12px;
       background: #fff;
@@ -456,9 +515,10 @@ function generateReport(baseline, stealth1, stealth2, headfulStealth, manualBase
       background: var(--head);
       position: sticky;
       top: 0;
-      z-index: 2;
+      z-index: 5;
       color: #1f2f4a;
       font-weight: 650;
+      box-shadow: inset 0 -1px 0 var(--line);
     }
     tbody tr:nth-child(even) td { background: #fbfdff; }
     .value-block {
@@ -527,6 +587,8 @@ function generateReport(baseline, stealth1, stealth2, headfulStealth, manualBase
           <li>no-stealth 跑 1 次</li>
           <li>stealth 跑 2 次</li>
           <li>stealth + headful 跑 1 次（追加轮）</li>
+          <li>stealth + 无头推荐参数 跑 1 次</li>
+          <li>stealth + 有头推荐参数 跑 1 次</li>
         </ol>
       </li>
       <li>每次重跑前先清理旧结果目录：<code>results/</code></li>
@@ -540,6 +602,8 @@ function generateReport(baseline, stealth1, stealth2, headfulStealth, manualBase
       <li>results/stealth-run-1.json</li>
       <li>results/stealth-run-2.json</li>
       <li>results/stealth-headful-run-1.json</li>
+      <li>results/stealth-recommended-headless-run-1.json</li>
+      <li>results/stealth-recommended-headful-run-1.json</li>
       <li>results/manual-headful-merged.json（手工维护，只读）</li>
     </ul>
   </section>
@@ -552,7 +616,8 @@ function generateReport(baseline, stealth1, stealth2, headfulStealth, manualBase
       <li>“生效判断”基于 no-stealth vs stealth(run1)</li>
       <li>“固定/随机”基于 stealth run1 vs run2</li>
       <li>“headful差异”基于 headless-stealth(run1) vs headful-stealth(run1)</li>
-      <li>“manual差异”对 manual 基准中存在的字段生效，基于 headful-stealth(run1) vs manual 基准</li>
+      <li>“manual差异(原有头)”对 manual 基准中存在的字段生效，基于 headful-stealth(run1) vs manual 基准</li>
+      <li>“manual差异(推荐无头/推荐有头)”用于验证应用推荐参数后的收敛效果</li>
       <li>已纳入关键一致性监控（含 <code>language</code> vs <code>languages</code>、UA hints、window 尺寸等）</li>
     </ul>
     ${renderCategoryTables(rows)}
@@ -609,7 +674,50 @@ function main() {
     ? readJson(manualBaselinePath)
     : null;
 
-  const report = generateReport(baseline, stealth1, stealth2, headfulStealth, manualBaseline);
+  let recommendedHeadless = null;
+  let recommendedHeadful = null;
+  const headlessSuggest = buildSuggestions('stealth(run1)', stealth1, manualBaseline, true);
+  const headfulSuggest = buildSuggestions('headful-stealth(run1)', headfulStealth, manualBaseline, false);
+
+  if (manualBaseline) {
+    const headlessRecipePath = path.join(resultsDir, 'recommended-headless-recipe.json');
+    const headfulRecipePath = path.join(resultsDir, 'recommended-headful-recipe.json');
+    fs.writeFileSync(
+      headlessRecipePath,
+      JSON.stringify({ ...headlessSuggest.plan, modeLabel: 'stealth-recommended-headless' }, null, 2)
+    );
+    fs.writeFileSync(
+      headfulRecipePath,
+      JSON.stringify({ ...headfulSuggest.plan, modeLabel: 'stealth-recommended-headful' }, null, 2)
+    );
+
+    runProbe([
+      '--stealth',
+      `--recipe=${headlessRecipePath}`,
+      `--out=${path.join(resultsDir, 'stealth-recommended-headless-run-1.json')}`
+    ]);
+    runProbe([
+      '--stealth',
+      '--headful',
+      `--recipe=${headfulRecipePath}`,
+      `--out=${path.join(resultsDir, 'stealth-recommended-headful-run-1.json')}`
+    ]);
+
+    recommendedHeadless = readJson(path.join(resultsDir, 'stealth-recommended-headless-run-1.json'));
+    recommendedHeadful = readJson(path.join(resultsDir, 'stealth-recommended-headful-run-1.json'));
+  }
+
+  const report = generateReport(
+    baseline,
+    stealth1,
+    stealth2,
+    headfulStealth,
+    recommendedHeadless,
+    recommendedHeadful,
+    manualBaseline,
+    headlessSuggest,
+    headfulSuggest
+  );
   fs.writeFileSync(reportPath, report);
   fs.rmSync(path.join(baseDir, 'report.md'), { force: true });
   console.log(`Generated report: ${reportPath}`);

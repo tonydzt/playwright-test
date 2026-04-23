@@ -14,6 +14,8 @@ const generatedResultFiles = [
   'stealth-headful-run-1.json',
   'stealth-recommended-headless-run-1.json',
   'stealth-recommended-headful-run-1.json',
+  'stealth-recommended-headless-refresh-run-1.json',
+  'stealth-recommended-headful-refresh-run-1.json',
   'recommended-headless-recipe.json',
   'recommended-headful-recipe.json'
 ];
@@ -38,6 +40,18 @@ function formatValue(v) {
     return 'undefined';
   }
   return JSON.stringify(v);
+}
+
+function deepGet(obj, dottedPath) {
+  if (!obj || !dottedPath) {
+    return undefined;
+  }
+  return dottedPath.split('.').reduce((acc, key) => {
+    if (acc === null || typeof acc === 'undefined') {
+      return undefined;
+    }
+    return acc[key];
+  }, obj);
 }
 
 function escapeHtml(str) {
@@ -79,7 +93,7 @@ function renderHtmlTable(rows) {
         ? `<td rowspan="${list.length}" class="config-cell"><code>${escapeHtml(configItem)}</code></td>`
         : '';
       trs.push(
-        `<tr>${configCell}<td><code>${escapeHtml(r.item)}</code></td><td><pre class="value-block">${escapeHtml(r.baseline)}</pre></td><td><pre class="value-block">${escapeHtml(r.stealth)}</pre></td><td><pre class="value-block">${escapeHtml(r.headfulStealth)}</pre></td><td><pre class="value-block">${escapeHtml(r.recommendedHeadless)}</pre></td><td><pre class="value-block">${escapeHtml(r.recommendedHeadful)}</pre></td><td><pre class="value-block">${escapeHtml(r.manualRef)}</pre></td><td><pre class="value-block">${escapeHtml(r.configValue)}</pre></td><td>${renderBooleanIcon(r.effectChanged, '生效', '未生效')}</td><td>${renderBooleanIcon(r.isFixed, '固定', '随机')}</td><td>${renderDiffIcon(r.headfulDiff)}</td><td>${renderDiffIcon(r.manualDiff)}</td><td>${renderDiffIcon(r.recommendedHeadlessManualDiff)}</td><td>${renderDiffIcon(r.recommendedHeadfulManualDiff)}</td></tr>`
+        `<tr>${configCell}<td><code>${escapeHtml(r.item)}</code></td><td><pre class="value-block">${escapeHtml(r.baseline)}</pre></td><td><pre class="value-block">${escapeHtml(r.stealth)}</pre></td><td><pre class="value-block">${escapeHtml(r.headfulStealth)}</pre></td><td><pre class="value-block">${escapeHtml(r.recommendedHeadless)}</pre></td><td><pre class="value-block">${escapeHtml(r.recommendedHeadful)}</pre></td><td><pre class="value-block">${escapeHtml(r.recommendedHeadlessRefresh)}</pre></td><td><pre class="value-block">${escapeHtml(r.recommendedHeadfulRefresh)}</pre></td><td><pre class="value-block">${escapeHtml(r.manualRef)}</pre></td><td><pre class="value-block">${escapeHtml(r.configValue)}</pre></td><td>${renderBooleanIcon(r.effectChanged, '生效', '未生效')}</td><td>${renderBooleanIcon(r.isFixed, '固定', '随机')}</td><td>${renderDiffIcon(r.headfulDiff)}</td><td>${renderDiffIcon(r.manualDiff)}</td><td>${renderDiffIcon(r.recommendedHeadlessManualDiff)}</td><td>${renderDiffIcon(r.recommendedHeadfulManualDiff)}</td><td>${renderDiffIcon(r.recommendedHeadlessRefreshManualDiff)}</td><td>${renderDiffIcon(r.recommendedHeadfulRefreshManualDiff)}</td></tr>`
       );
     });
   }
@@ -95,6 +109,8 @@ function renderHtmlTable(rows) {
         <th>headful-stealth(run1)</th>
         <th>recommended-headless(run1)</th>
         <th>recommended-headful(run1)</th>
+        <th>recommended-headless+refresh(run1)</th>
+        <th>recommended-headful+refresh(run1)</th>
         <th>manual基准</th>
         <th>配置值(观测)</th>
         <th>生效判断</th>
@@ -103,6 +119,8 @@ function renderHtmlTable(rows) {
         <th>manual差异(原有头)</th>
         <th>manual差异(推荐无头)</th>
         <th>manual差异(推荐有头)</th>
+        <th>manual差异(推荐无头+刷新)</th>
+        <th>manual差异(推荐有头+刷新)</th>
       </tr>
     </thead>
     <tbody>
@@ -160,7 +178,10 @@ function buildAlignmentPlan(sampleSource, manualBaseline, isHeadless) {
     'webglRenderer',
     'hasChrome',
     'chromeRuntimeExists',
-    'chromeAppExists'
+    'chromeAppExists',
+    'screenWidth',
+    'screenHeight',
+    'devicePixelRatio'
   ];
   for (const key of resultKeys) {
     if (!valueEqual(sampleResult[key], manualResult[key])) {
@@ -170,15 +191,16 @@ function buildAlignmentPlan(sampleSource, manualBaseline, isHeadless) {
 
   const diffKeys = new Set(diffs.map((d) => d.key));
   const contextOptions = {};
+  const launchOptions = {};
+  let webglOverride = null;
+  let chromeRuntimeOverride = null;
   const extraHTTPHeaders = {};
   const initScriptLines = [];
   const notes = [];
   const cannotAutoAlign = [];
-  let needsCDPOverride = false;
 
   if (diffKeys.has('requestHeaders.user-agent') || diffKeys.has('result.userAgent')) {
     contextOptions.userAgent = manualHeaders['user-agent'] || manualResult.userAgent;
-    needsCDPOverride = true;
   }
 
   if (diffKeys.has('requestHeaders.accept-language')) {
@@ -220,19 +242,96 @@ function buildAlignmentPlan(sampleSource, manualBaseline, isHeadless) {
   if (diffKeys.has('result.vendor') && typeof manualResult.vendor === 'string') {
     initScriptLines.push(`Object.defineProperty(navigator, 'vendor', { get: () => ${JSON.stringify(manualResult.vendor)} });`);
   }
+  if (
+    diffKeys.has('result.hasChrome') ||
+    diffKeys.has('result.chromeRuntimeExists') ||
+    diffKeys.has('result.chromeAppExists')
+  ) {
+    const hasChrome = manualResult.hasChrome !== false;
+    const hasRuntime = !!manualResult.chromeRuntimeExists;
+    const hasApp = !!manualResult.chromeAppExists;
+    chromeRuntimeOverride = { hasChrome, hasRuntime, hasApp };
+    initScriptLines.push(`(() => {
+  const chromeObj = (window.chrome && typeof window.chrome === 'object') ? window.chrome : {};
+  if (${hasRuntime}) {
+    chromeObj.runtime = chromeObj.runtime && typeof chromeObj.runtime === 'object'
+      ? chromeObj.runtime
+      : { connect: () => {}, sendMessage: () => {} };
+    if (typeof chromeObj.runtime.connect !== 'function') chromeObj.runtime.connect = () => {};
+    if (typeof chromeObj.runtime.sendMessage !== 'function') chromeObj.runtime.sendMessage = () => {};
+  } else {
+    try { delete chromeObj.runtime; } catch (e) { chromeObj.runtime = undefined; }
+  }
+  if (${hasApp}) {
+    chromeObj.app = chromeObj.app && typeof chromeObj.app === 'object' ? chromeObj.app : {};
+  } else {
+    try { delete chromeObj.app; } catch (e) { chromeObj.app = undefined; }
+  }
+  if (${hasChrome}) {
+    Object.defineProperty(window, 'chrome', {
+      get: () => chromeObj,
+      configurable: true
+    });
+  } else {
+    try { delete window.chrome; } catch (e) {}
+  }
+})();`);
+    notes.push('已使用 addInitScript 对齐 window.chrome/runtime/app（按 manual 目标值）。');
+  }
   if (diffKeys.has('result.webglVendor') || diffKeys.has('result.webglRenderer')) {
-    const vendor = manualResult.webglVendor || 'Intel Inc.';
-    const renderer = manualResult.webglRenderer || 'Intel Iris OpenGL Engine';
-    initScriptLines.push(`
-const _origGetParameter = WebGLRenderingContext.prototype.getParameter;
-WebGLRenderingContext.prototype.getParameter = function(param) {
-  if (param === 37445) return ${JSON.stringify(vendor)};
-  if (param === 37446) return ${JSON.stringify(renderer)};
-  return _origGetParameter.call(this, param);
-};`.trim());
+    webglOverride = {
+      vendor: manualResult.webglVendor || 'Intel Inc.',
+      renderer: manualResult.webglRenderer || 'Intel Iris OpenGL Engine'
+    };
+    notes.push('已启用 webgl.vendor 定制：使用 manual 的 vendor/renderer 覆盖 stealth 默认值。');
   }
 
-  for (const k of ['result.pluginsLength', 'result.mimeTypesLength', 'result.hasChrome', 'result.chromeRuntimeExists', 'result.chromeAppExists']) {
+  const hasWindowSizeDiff =
+    diffKeys.has('result.outerWidth') ||
+    diffKeys.has('result.outerHeight') ||
+    diffKeys.has('result.innerWidth') ||
+    diffKeys.has('result.innerHeight') ||
+    diffKeys.has('result.screenWidth') ||
+    diffKeys.has('result.screenHeight');
+
+  if (hasWindowSizeDiff && !isHeadless) {
+    launchOptions.args = ['--start-maximized'];
+    contextOptions.viewport = null;
+    notes.push('已自动加入窗口对齐策略：launch args 使用 --start-maximized，且 context.viewport = null。');
+  }
+
+  if (hasWindowSizeDiff && isHeadless) {
+    const viewportWidth = Number.isFinite(manualResult.innerWidth)
+      ? manualResult.innerWidth
+      : (Number.isFinite(manualResult.screenWidth) ? manualResult.screenWidth : 1280);
+    const viewportHeight = Number.isFinite(manualResult.innerHeight)
+      ? manualResult.innerHeight
+      : (Number.isFinite(manualResult.screenHeight) ? manualResult.screenHeight : 720);
+    const screenWidth = Number.isFinite(manualResult.screenWidth)
+      ? manualResult.screenWidth
+      : viewportWidth;
+    const screenHeight = Number.isFinite(manualResult.screenHeight)
+      ? manualResult.screenHeight
+      : viewportHeight;
+    const deviceScaleFactor = Number.isFinite(manualResult.devicePixelRatio)
+      ? manualResult.devicePixelRatio
+      : 1;
+    const outerWidthOffset = Number.isFinite(manualResult.outerWidth) && Number.isFinite(manualResult.innerWidth)
+      ? manualResult.outerWidth - manualResult.innerWidth
+      : 120;
+    const outerHeightOffset = Number.isFinite(manualResult.outerHeight) && Number.isFinite(manualResult.innerHeight)
+      ? manualResult.outerHeight - manualResult.innerHeight
+      : 120;
+
+    contextOptions.viewport = { width: viewportWidth, height: viewportHeight };
+    contextOptions.screen = { width: screenWidth, height: screenHeight };
+    contextOptions.deviceScaleFactor = deviceScaleFactor;
+    initScriptLines.push(`Object.defineProperty(window, 'outerWidth', { get: () => window.innerWidth + ${outerWidthOffset} });`);
+    initScriptLines.push(`Object.defineProperty(window, 'outerHeight', { get: () => window.innerHeight + ${outerHeightOffset} });`);
+    notes.push('已自动加入无头窗口对齐策略：viewport/screen/deviceScaleFactor 对齐 manual，并注入 outerWidth/outerHeight。');
+  }
+
+  for (const k of ['result.pluginsLength', 'result.mimeTypesLength']) {
     if (diffKeys.has(k)) {
       cannotAutoAlign.push(`${k} 受浏览器实现与运行时环境影响，通常无法仅靠简单配置完全对齐。`);
     }
@@ -242,12 +341,56 @@ WebGLRenderingContext.prototype.getParameter = function(param) {
     contextOptions.extraHTTPHeaders = extraHTTPHeaders;
   }
 
-  const cdpUserAgentOverride = needsCDPOverride
-    ? {
-        userAgent: contextOptions.userAgent || manualHeaders['user-agent'] || '',
-        acceptLanguage: manualHeaders['accept-language'] || ''
-      }
+  const needsCdpUAOverride =
+    diffKeys.has('requestHeaders.user-agent') ||
+    diffKeys.has('requestHeaders.sec-ch-ua') ||
+    diffKeys.has('requestHeaders.sec-ch-ua-platform') ||
+    diffKeys.has('requestHeaders.sec-ch-ua-mobile') ||
+    diffKeys.has('result.userAgent') ||
+    [...diffKeys].some((k) => k.startsWith('result.userAgentData.'));
+
+  const cdpUserAgentOverride = needsCdpUAOverride
+    ? (() => {
+        const userAgent = contextOptions.userAgent || manualHeaders['user-agent'] || manualResult.userAgent || '';
+        const lowEntropy = manualResult.userAgentData?.lowEntropy || {};
+        const highEntropy = manualResult.userAgentData?.highEntropy || {};
+        const brands = Array.isArray(lowEntropy.brands)
+          ? lowEntropy.brands
+          : (Array.isArray(highEntropy.brands) ? highEntropy.brands : []);
+        const fullVersionList = Array.isArray(highEntropy.fullVersionList)
+          ? highEntropy.fullVersionList
+          : [];
+        const platform = typeof lowEntropy.platform === 'string'
+          ? lowEntropy.platform
+          : (typeof highEntropy.platform === 'string' ? highEntropy.platform : undefined);
+        const mobile = typeof lowEntropy.mobile === 'boolean'
+          ? lowEntropy.mobile
+          : (typeof highEntropy.mobile === 'boolean' ? highEntropy.mobile : false);
+        const metadata = { brands, mobile, platform };
+        const optionalPairs = [
+          ['fullVersionList', fullVersionList],
+          ['platformVersion', highEntropy.platformVersion],
+          ['architecture', highEntropy.architecture],
+          ['bitness', highEntropy.bitness],
+          ['model', highEntropy.model],
+          ['wow64', highEntropy.wow64],
+          ['fullVersion', highEntropy.uaFullVersion]
+        ];
+        for (const [k, v] of optionalPairs) {
+          if (Array.isArray(v) ? v.length > 0 : typeof v !== 'undefined') {
+            metadata[k] = v;
+          }
+        }
+        return {
+          userAgent,
+          platform,
+          userAgentMetadata: metadata
+        };
+      })()
     : null;
+  if (needsCdpUAOverride) {
+    notes.push('已使用 CDP(Network.setUserAgentOverride) 对齐 userAgentData 与 sec-ch-*。');
+  }
 
   const gotoOptions = {};
   if (diffKeys.has('requestHeaders.referer') && manualHeaders.referer) {
@@ -256,6 +399,9 @@ WebGLRenderingContext.prototype.getParameter = function(param) {
 
   return {
     diffCount: diffs.length,
+    launchOptions,
+    webglOverride,
+    chromeRuntimeOverride,
     contextOptions,
     cdpUserAgentOverride,
     initScripts: initScriptLines,
@@ -269,14 +415,16 @@ WebGLRenderingContext.prototype.getParameter = function(param) {
 function buildSuggestions(sampleName, sampleSource, manualBaseline, isHeadless) {
   const plan = buildAlignmentPlan(sampleSource, manualBaseline, isHeadless);
 
+  const launchOptionsText = JSON.stringify(
+    { headless: isHeadless, ...(plan.launchOptions || {}) },
+    null,
+    2
+  );
   const contextOptionsText = JSON.stringify(plan.contextOptions, null, 2);
   const cdpText = plan.cdpUserAgentOverride
     ? `
 const client = await context.newCDPSession(page);
-await client.send('Network.setUserAgentOverride', {
-  userAgent: ${JSON.stringify(plan.cdpUserAgentOverride.userAgent)},
-  acceptLanguage: ${JSON.stringify(plan.cdpUserAgentOverride.acceptLanguage)}
-});
+await client.send('Network.setUserAgentOverride', ${JSON.stringify(plan.cdpUserAgentOverride, null, 2)});
 `.trim()
     : '';
 
@@ -291,10 +439,14 @@ await context.addInitScript(() => {
   const gotoOptionsText = plan.gotoOptions && Object.keys(plan.gotoOptions).length
     ? `, ${JSON.stringify(plan.gotoOptions, null, 2).slice(1, -1).trim()}`
     : '';
+  const webglConfigText = plan.webglOverride
+    ? `\n// 在 stealth 初始化阶段覆盖 webgl.vendor 默认值\nconst stealthPlugin = stealth();\nstealthPlugin.enabledEvasions.delete('webgl.vendor');\nchromium.use(require('puppeteer-extra-plugin-stealth/evasions/webgl.vendor')(${JSON.stringify(plan.webglOverride, null, 2)}));\nchromium.use(stealthPlugin);\n`
+    : '';
 
   const snippet = `
 // ${sampleName} 建议模板（目标：贴近 manual 基准）
-const browser = await chromium.launch({ headless: ${isHeadless ? 'true' : 'false'} });
+${webglConfigText}
+const browser = await chromium.launch(${launchOptionsText});
 const context = await browser.newContext(${contextOptionsText});
 const page = await context.newPage();
 ${cdpText}
@@ -318,6 +470,8 @@ function generateReport(
   headfulStealth,
   recommendedHeadless,
   recommendedHeadful,
+  recommendedHeadlessRefresh,
+  recommendedHeadfulRefresh,
   manualBaseline,
   headlessSuggest,
   headfulSuggest
@@ -328,31 +482,9 @@ function generateReport(
       const headerKey = key.slice('requestHeaders.'.length);
       return safeSource.requestHeaders?.[headerKey];
     }
-    if (key === 'requestHeaders.user-agent') return safeSource.requestHeaders?.['user-agent'];
-    if (key === 'requestHeaders.sec-ch-ua') return safeSource.requestHeaders?.['sec-ch-ua'];
-    if (key === 'requestHeaders.sec-ch-ua-platform') return safeSource.requestHeaders?.['sec-ch-ua-platform'];
-    if (key === 'requestHeaders.sec-ch-ua-mobile') return safeSource.requestHeaders?.['sec-ch-ua-mobile'];
-    if (key === 'requestHeaders.accept-language') return safeSource.requestHeaders?.['accept-language'];
-    if (key === 'result.userAgent') return safeSource.result.userAgent;
-    if (key === 'result.platform') return safeSource.result.platform;
-    if (key === 'result.language') return safeSource.result.language;
-    if (key === 'result.webdriver') return safeSource.result.webdriver;
-    if (key === 'result.pluginsLength') return safeSource.result.pluginsLength;
-    if (key === 'result.plugins') return safeSource.result.plugins;
-    if (key === 'result.mimeTypesLength') return safeSource.result.mimeTypesLength;
-    if (key === 'result.mimeTypes') return safeSource.result.mimeTypes;
-    if (key === 'result.hardwareConcurrency') return safeSource.result.hardwareConcurrency;
-    if (key === 'result.languages') return safeSource.result.languages;
-    if (key === 'result.webglVendor') return safeSource.result.webglVendor;
-    if (key === 'result.webglRenderer') return safeSource.result.webglRenderer;
-    if (key === 'result.chromeRuntimeExists') return safeSource.result.chromeRuntimeExists;
-    if (key === 'result.chromeAppExists') return safeSource.result.chromeAppExists;
-    if (key === 'result.hasChrome') return safeSource.result.hasChrome;
-    if (key === 'result.vendor') return safeSource.result.vendor;
-    if (key === 'result.outerWidth') return safeSource.result.outerWidth;
-    if (key === 'result.outerHeight') return safeSource.result.outerHeight;
-    if (key === 'result.innerWidth') return safeSource.result.innerWidth;
-    if (key === 'result.innerHeight') return safeSource.result.innerHeight;
+    if (key.startsWith('result.')) {
+      return deepGet(safeSource.result, key.slice('result.'.length));
+    }
     return undefined;
   };
 
@@ -397,7 +529,25 @@ function generateReport(
     { item: 'result.outerWidth', configItem: 'stealth/evasions/window.outerdimensions', category: 'graphics_media' },
     { item: 'result.outerHeight', configItem: 'stealth/evasions/window.outerdimensions', category: 'graphics_media' },
     { item: 'result.innerWidth', configItem: 'stealth/evasions/window.outerdimensions', category: 'graphics_media' },
-    { item: 'result.innerHeight', configItem: 'stealth/evasions/window.outerdimensions', category: 'graphics_media' }
+    { item: 'result.innerHeight', configItem: 'stealth/evasions/window.outerdimensions', category: 'graphics_media' },
+    { item: 'result.screenWidth', configItem: 'stealth/evasions/window.outerdimensions', category: 'graphics_media' },
+    { item: 'result.screenHeight', configItem: 'stealth/evasions/window.outerdimensions', category: 'graphics_media' },
+    { item: 'result.devicePixelRatio', configItem: 'stealth/evasions/window.outerdimensions', category: 'graphics_media' },
+    { item: 'result.userAgentData.supported', configItem: 'client-hints/userAgentData', category: 'navigator_fingerprint' },
+    { item: 'result.userAgentData.lowEntropy.brands', configItem: 'client-hints/userAgentData', category: 'navigator_fingerprint' },
+    { item: 'result.userAgentData.lowEntropy.mobile', configItem: 'client-hints/userAgentData', category: 'navigator_fingerprint' },
+    { item: 'result.userAgentData.lowEntropy.platform', configItem: 'client-hints/userAgentData', category: 'navigator_fingerprint' },
+    { item: 'result.userAgentData.highEntropy.architecture', configItem: 'client-hints/userAgentData', category: 'navigator_fingerprint' },
+    { item: 'result.userAgentData.highEntropy.bitness', configItem: 'client-hints/userAgentData', category: 'navigator_fingerprint' },
+    { item: 'result.userAgentData.highEntropy.brands', configItem: 'client-hints/userAgentData', category: 'navigator_fingerprint' },
+    { item: 'result.userAgentData.highEntropy.formFactors', configItem: 'client-hints/userAgentData', category: 'navigator_fingerprint' },
+    { item: 'result.userAgentData.highEntropy.fullVersionList', configItem: 'client-hints/userAgentData', category: 'navigator_fingerprint' },
+    { item: 'result.userAgentData.highEntropy.mobile', configItem: 'client-hints/userAgentData', category: 'navigator_fingerprint' },
+    { item: 'result.userAgentData.highEntropy.model', configItem: 'client-hints/userAgentData', category: 'navigator_fingerprint' },
+    { item: 'result.userAgentData.highEntropy.platform', configItem: 'client-hints/userAgentData', category: 'navigator_fingerprint' },
+    { item: 'result.userAgentData.highEntropy.platformVersion', configItem: 'client-hints/userAgentData', category: 'navigator_fingerprint' },
+    { item: 'result.userAgentData.highEntropy.uaFullVersion', configItem: 'client-hints/userAgentData', category: 'navigator_fingerprint' },
+    { item: 'result.userAgentData.highEntropy.wow64', configItem: 'client-hints/userAgentData', category: 'navigator_fingerprint' }
   ];
 
   const rows = checks.map(({ item, configItem, category }) => {
@@ -407,6 +557,8 @@ function generateReport(
     const headfulValue = getByPath(headfulStealth, item);
     const recommendedHeadlessValue = getByPath(recommendedHeadless, item);
     const recommendedHeadfulValue = getByPath(recommendedHeadful, item);
+    const recommendedHeadlessRefreshValue = getByPath(recommendedHeadlessRefresh, item);
+    const recommendedHeadfulRefreshValue = getByPath(recommendedHeadfulRefresh, item);
     const manualValue = getByPath(
       manualBaseline || { requestHeaders: {}, result: {} },
       item
@@ -420,6 +572,8 @@ function generateReport(
       headfulStealth: formatValue(headfulValue),
       recommendedHeadless: formatValue(recommendedHeadlessValue),
       recommendedHeadful: formatValue(recommendedHeadfulValue),
+      recommendedHeadlessRefresh: formatValue(recommendedHeadlessRefreshValue),
+      recommendedHeadfulRefresh: formatValue(recommendedHeadfulRefreshValue),
       manualRef: formatValue(manualValue),
       configValue: formatValue(stealthValue),
       effectChanged: !valueEqual(baselineValue, stealthValue),
@@ -433,7 +587,13 @@ function generateReport(
         : !valueEqual(recommendedHeadlessValue, manualValue),
       recommendedHeadfulManualDiff: typeof manualValue === 'undefined'
         ? false
-        : !valueEqual(recommendedHeadfulValue, manualValue)
+        : !valueEqual(recommendedHeadfulValue, manualValue),
+      recommendedHeadlessRefreshManualDiff: typeof manualValue === 'undefined'
+        ? false
+        : !valueEqual(recommendedHeadlessRefreshValue, manualValue),
+      recommendedHeadfulRefreshManualDiff: typeof manualValue === 'undefined'
+        ? false
+        : !valueEqual(recommendedHeadfulRefreshValue, manualValue)
     };
   });
 
@@ -497,7 +657,7 @@ function generateReport(
     }
     table {
       width: 100%;
-      min-width: 1700px;
+      min-width: 2300px;
       border-collapse: collapse;
       table-layout: fixed;
     }
@@ -589,6 +749,8 @@ function generateReport(
           <li>stealth + headful 跑 1 次（追加轮）</li>
           <li>stealth + 无头推荐参数 跑 1 次</li>
           <li>stealth + 有头推荐参数 跑 1 次</li>
+          <li>无头推荐参数加载后刷新 1 次，再采集 1 次</li>
+          <li>有头推荐参数加载后刷新 1 次，再采集 1 次</li>
         </ol>
       </li>
       <li>每次重跑前先清理旧结果目录：<code>results/</code></li>
@@ -604,6 +766,8 @@ function generateReport(
       <li>results/stealth-headful-run-1.json</li>
       <li>results/stealth-recommended-headless-run-1.json</li>
       <li>results/stealth-recommended-headful-run-1.json</li>
+      <li>results/stealth-recommended-headless-refresh-run-1.json</li>
+      <li>results/stealth-recommended-headful-refresh-run-1.json</li>
       <li>results/manual-headful-merged.json（手工维护，只读）</li>
     </ul>
   </section>
@@ -618,6 +782,7 @@ function generateReport(
       <li>“headful差异”基于 headless-stealth(run1) vs headful-stealth(run1)</li>
       <li>“manual差异(原有头)”对 manual 基准中存在的字段生效，基于 headful-stealth(run1) vs manual 基准</li>
       <li>“manual差异(推荐无头/推荐有头)”用于验证应用推荐参数后的收敛效果</li>
+      <li>“manual差异(推荐+刷新)”用于验证二次加载（refresh）后的收敛效果</li>
       <li>已纳入关键一致性监控（含 <code>language</code> vs <code>languages</code>、UA hints、window 尺寸等）</li>
     </ul>
     ${renderCategoryTables(rows)}
@@ -676,6 +841,8 @@ function main() {
 
   let recommendedHeadless = null;
   let recommendedHeadful = null;
+  let recommendedHeadlessRefresh = null;
+  let recommendedHeadfulRefresh = null;
   const headlessSuggest = buildSuggestions('stealth(run1)', stealth1, manualBaseline, true);
   const headfulSuggest = buildSuggestions('headful-stealth(run1)', headfulStealth, manualBaseline, false);
 
@@ -702,9 +869,24 @@ function main() {
       `--recipe=${headfulRecipePath}`,
       `--out=${path.join(resultsDir, 'stealth-recommended-headful-run-1.json')}`
     ]);
+    runProbe([
+      '--stealth',
+      '--reload-once',
+      `--recipe=${headlessRecipePath}`,
+      `--out=${path.join(resultsDir, 'stealth-recommended-headless-refresh-run-1.json')}`
+    ]);
+    runProbe([
+      '--stealth',
+      '--headful',
+      '--reload-once',
+      `--recipe=${headfulRecipePath}`,
+      `--out=${path.join(resultsDir, 'stealth-recommended-headful-refresh-run-1.json')}`
+    ]);
 
     recommendedHeadless = readJson(path.join(resultsDir, 'stealth-recommended-headless-run-1.json'));
     recommendedHeadful = readJson(path.join(resultsDir, 'stealth-recommended-headful-run-1.json'));
+    recommendedHeadlessRefresh = readJson(path.join(resultsDir, 'stealth-recommended-headless-refresh-run-1.json'));
+    recommendedHeadfulRefresh = readJson(path.join(resultsDir, 'stealth-recommended-headful-refresh-run-1.json'));
   }
 
   const report = generateReport(
@@ -714,6 +896,8 @@ function main() {
     headfulStealth,
     recommendedHeadless,
     recommendedHeadful,
+    recommendedHeadlessRefresh,
+    recommendedHeadfulRefresh,
     manualBaseline,
     headlessSuggest,
     headfulSuggest

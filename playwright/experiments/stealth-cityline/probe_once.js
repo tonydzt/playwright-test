@@ -2,9 +2,11 @@ const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright-extra');
 const stealth = require('puppeteer-extra-plugin-stealth');
+const webglVendorEvasion = require('puppeteer-extra-plugin-stealth/evasions/webgl.vendor');
 
 const useStealth = process.argv.includes('--stealth');
 const useHeadful = process.argv.includes('--headful');
+const reloadOnceArg = process.argv.includes('--reload-once');
 const outputArg = process.argv.find((arg) => arg.startsWith('--out='));
 const recipeArg = process.argv.find((arg) => arg.startsWith('--recipe='));
 const outputFile = outputArg ? outputArg.slice('--out='.length) : null;
@@ -13,11 +15,20 @@ const targetUrl = 'https://www.cityline.com/zh_CN/Events.html';
 const recipe = recipeFile ? JSON.parse(fs.readFileSync(path.resolve(recipeFile), 'utf8')) : null;
 
 if (useStealth) {
-  chromium.use(stealth());
+  const stealthPlugin = stealth();
+  if (recipe && recipe.chromeRuntimeOverride) {
+    stealthPlugin.enabledEvasions.delete('chrome.runtime');
+  }
+  if (recipe && recipe.webglOverride) {
+    stealthPlugin.enabledEvasions.delete('webgl.vendor');
+    chromium.use(webglVendorEvasion(recipe.webglOverride));
+  }
+  chromium.use(stealthPlugin);
 }
 
 async function run() {
-  const browser = await chromium.launch({ headless: !useHeadful });
+  const launchOptions = { headless: !useHeadful, ...((recipe && recipe.launchOptions) || {}) };
+  const browser = await chromium.launch(launchOptions);
   const context = await browser.newContext((recipe && recipe.contextOptions) || {});
   if (recipe && Array.isArray(recipe.initScripts)) {
     for (const script of recipe.initScripts) {
@@ -27,13 +38,32 @@ async function run() {
   const page = await context.newPage();
   if (recipe && recipe.cdpUserAgentOverride) {
     const client = await context.newCDPSession(page);
-    await client.send('Network.setUserAgentOverride', recipe.cdpUserAgentOverride);
+    try {
+      await client.send('Network.setUserAgentOverride', recipe.cdpUserAgentOverride);
+    } catch (err) {
+      const md = recipe.cdpUserAgentOverride.userAgentMetadata;
+      if (!md) {
+        throw err;
+      }
+      const fallback = {
+        userAgent: recipe.cdpUserAgentOverride.userAgent,
+        acceptLanguage: recipe.cdpUserAgentOverride.acceptLanguage,
+        platform: recipe.cdpUserAgentOverride.platform
+      };
+      const brands = Array.isArray(md.brands) ? md.brands : [];
+      const mobile = typeof md.mobile === 'boolean' ? md.mobile : false;
+      const platform = typeof md.platform === 'string' ? md.platform : undefined;
+      if (brands.length && platform) {
+        fallback.userAgentMetadata = { brands, mobile, platform };
+      }
+      await client.send('Network.setUserAgentOverride', fallback);
+    }
   }
 
   let mainRequestHeaders = null;
   let mainNavigationRequest = null;
   page.on('request', (request) => {
-    if (!mainNavigationRequest && request.isNavigationRequest() && request.frame() === page.mainFrame()) {
+    if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
       mainNavigationRequest = request;
     }
   });
@@ -70,6 +100,22 @@ async function run() {
   }
 
   await gotoWithRetry();
+  if (reloadOnceArg || (recipe && recipe.reloadOnce)) {
+    let reloaded = false;
+    for (let i = 0; i < 4; i += 1) {
+      const waitUntil = i % 2 === 0 ? 'domcontentloaded' : 'commit';
+      try {
+        await page.reload({ waitUntil, timeout: 30000 });
+        reloaded = true;
+        break;
+      } catch {
+        await page.waitForTimeout(1500);
+      }
+    }
+    if (!reloaded) {
+      throw new Error('Reload failed after retries');
+    }
+  }
 
   if (mainNavigationRequest) {
     try {
@@ -81,7 +127,7 @@ async function run() {
 
   async function collectResultWithRetry() {
     try {
-      return await page.evaluate(() => {
+      return await page.evaluate(async () => {
         const gl = document.createElement('canvas').getContext('webgl');
         const webglVendor = gl ? gl.getParameter(37445) : null;
         const webglRenderer = gl ? gl.getParameter(37446) : null;
@@ -89,6 +135,41 @@ async function run() {
         const hasChrome = typeof window.chrome !== 'undefined';
         const chromeRuntimeExists = hasChrome && typeof window.chrome.runtime !== 'undefined';
         const chromeAppExists = hasChrome && typeof window.chrome.app !== 'undefined';
+        const readUserAgentData = async () => {
+          const uad = navigator.userAgentData;
+          if (!uad) {
+            return { supported: false };
+          }
+          const hints = [
+            'architecture',
+            'bitness',
+            'brands',
+            'formFactors',
+            'fullVersionList',
+            'mobile',
+            'model',
+            'platform',
+            'platformVersion',
+            'uaFullVersion',
+            'wow64'
+          ];
+          let highEntropy = {};
+          try {
+            highEntropy = await uad.getHighEntropyValues(hints);
+          } catch (e) {
+            highEntropy = { error: String(e && e.message ? e.message : e) };
+          }
+          return {
+            supported: true,
+            lowEntropy: {
+              brands: uad.brands,
+              mobile: uad.mobile,
+              platform: uad.platform
+            },
+            highEntropy
+          };
+        };
+        const userAgentData = await readUserAgentData();
 
         return {
           userAgent: navigator.userAgent,
@@ -118,7 +199,11 @@ async function run() {
           outerWidth: window.outerWidth,
           outerHeight: window.outerHeight,
           innerWidth: window.innerWidth,
-          innerHeight: window.innerHeight
+          innerHeight: window.innerHeight,
+          screenWidth: window.screen.width,
+          screenHeight: window.screen.height,
+          devicePixelRatio: window.devicePixelRatio,
+          userAgentData
         };
       });
     } catch (err) {
@@ -127,7 +212,7 @@ async function run() {
         throw err;
       }
       await page.waitForTimeout(1500);
-      return await page.evaluate(() => {
+      return await page.evaluate(async () => {
         const gl = document.createElement('canvas').getContext('webgl');
         const webglVendor = gl ? gl.getParameter(37445) : null;
         const webglRenderer = gl ? gl.getParameter(37446) : null;
@@ -135,6 +220,41 @@ async function run() {
         const hasChrome = typeof window.chrome !== 'undefined';
         const chromeRuntimeExists = hasChrome && typeof window.chrome.runtime !== 'undefined';
         const chromeAppExists = hasChrome && typeof window.chrome.app !== 'undefined';
+        const readUserAgentData = async () => {
+          const uad = navigator.userAgentData;
+          if (!uad) {
+            return { supported: false };
+          }
+          const hints = [
+            'architecture',
+            'bitness',
+            'brands',
+            'formFactors',
+            'fullVersionList',
+            'mobile',
+            'model',
+            'platform',
+            'platformVersion',
+            'uaFullVersion',
+            'wow64'
+          ];
+          let highEntropy = {};
+          try {
+            highEntropy = await uad.getHighEntropyValues(hints);
+          } catch (e) {
+            highEntropy = { error: String(e && e.message ? e.message : e) };
+          }
+          return {
+            supported: true,
+            lowEntropy: {
+              brands: uad.brands,
+              mobile: uad.mobile,
+              platform: uad.platform
+            },
+            highEntropy
+          };
+        };
+        const userAgentData = await readUserAgentData();
 
         return {
           userAgent: navigator.userAgent,
@@ -164,7 +284,11 @@ async function run() {
           outerWidth: window.outerWidth,
           outerHeight: window.outerHeight,
           innerWidth: window.innerWidth,
-          innerHeight: window.innerHeight
+          innerHeight: window.innerHeight,
+          screenWidth: window.screen.width,
+          screenHeight: window.screen.height,
+          devicePixelRatio: window.devicePixelRatio,
+          userAgentData
         };
       });
     }

@@ -76,14 +76,79 @@
         "description": "Portable Document Format"
       }
     ],
-    "webglVendor": null,
-    "webglRenderer": null,
+    "webglVendor": "Google Inc. (Apple)",
+    "webglRenderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)",
     "hasChrome": true,
     "chromeRuntimeExists": false,
     "chromeAppExists": true,
     "outerWidth": 1920,
     "outerHeight": 1055,
     "innerWidth": 1346,
-    "innerHeight": 968
+    "innerHeight": 968,
+    "screenWidth": 1920,
+    "screenHeight": 1080,
+    "devicePixelRatio": 1,
+    "userAgentData": {
+      "supported": true,
+      "lowEntropy": {
+        "brands": [
+          {
+            "brand": "Chromium",
+            "version": "146"
+          },
+          {
+            "brand": "Not-A.Brand",
+            "version": "24"
+          },
+          {
+            "brand": "Google Chrome",
+            "version": "146"
+          }
+        ],
+        "mobile": false,
+        "platform": "macOS"
+      },
+      "highEntropy": {
+        "architecture": "arm",
+        "bitness": "64",
+        "brands": [
+          {
+            "brand": "Chromium",
+            "version": "146"
+          },
+          {
+            "brand": "Not-A.Brand",
+            "version": "24"
+          },
+          {
+            "brand": "Google Chrome",
+            "version": "146"
+          }
+        ],
+        "formFactors": [
+          "Desktop"
+        ],
+        "fullVersionList": [
+          {
+            "brand": "Chromium",
+            "version": "146.0.7680.178"
+          },
+          {
+            "brand": "Not-A.Brand",
+            "version": "24.0.0.0"
+          },
+          {
+            "brand": "Google Chrome",
+            "version": "146.0.7680.178"
+          }
+        ],
+        "mobile": false,
+        "model": "",
+        "platform": "macOS",
+        "platformVersion": "14.1.0",
+        "uaFullVersion": "146.0.7680.178",
+        "wow64": false
+      }
+    }
   }
 }

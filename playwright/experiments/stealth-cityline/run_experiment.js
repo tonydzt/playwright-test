@@ -54,6 +54,19 @@ function deepGet(obj, dottedPath) {
   }, obj);
 }
 
+function normalizeAcceptLanguageForCDP(value) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  return value
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => s.split(';')[0].trim())
+    .filter(Boolean)
+    .join(',');
+}
+
 function escapeHtml(str) {
   return String(str)
     .replace(/&/g, '&amp;')
@@ -204,7 +217,7 @@ function buildAlignmentPlan(sampleSource, manualBaseline, isHeadless) {
   }
 
   if (diffKeys.has('requestHeaders.accept-language')) {
-    extraHTTPHeaders['accept-language'] = manualHeaders['accept-language'];
+    notes.push('accept-language 通过 CDP acceptLanguage 对齐（使用无 q 的语言列表，避免 q 参数重复）。');
   }
   if (diffKeys.has('requestHeaders.accept')) {
     extraHTTPHeaders.accept = manualHeaders.accept;
@@ -342,6 +355,7 @@ function buildAlignmentPlan(sampleSource, manualBaseline, isHeadless) {
   }
 
   const needsCdpUAOverride =
+    diffKeys.has('requestHeaders.accept-language') ||
     diffKeys.has('requestHeaders.user-agent') ||
     diffKeys.has('requestHeaders.sec-ch-ua') ||
     diffKeys.has('requestHeaders.sec-ch-ua-platform') ||
@@ -383,7 +397,8 @@ function buildAlignmentPlan(sampleSource, manualBaseline, isHeadless) {
         }
         return {
           userAgent,
-          platform,
+          platform: manualResult.platform || platform,
+          acceptLanguage: normalizeAcceptLanguageForCDP(manualHeaders['accept-language']),
           userAgentMetadata: metadata
         };
       })()
@@ -783,6 +798,7 @@ function generateReport(
       <li>“manual差异(原有头)”对 manual 基准中存在的字段生效，基于 headful-stealth(run1) vs manual 基准</li>
       <li>“manual差异(推荐无头/推荐有头)”用于验证应用推荐参数后的收敛效果</li>
       <li>“manual差异(推荐+刷新)”用于验证二次加载（refresh）后的收敛效果</li>
+      <li>平台字段一致性规则：<code>result.platform(navigator.platform)</code> 目标值为 <code>MacIntel</code>，<code>result.userAgentData.*.platform</code> 目标值为 <code>macOS</code>（两者并存属正常）</li>
       <li>已纳入关键一致性监控（含 <code>language</code> vs <code>languages</code>、UA hints、window 尺寸等）</li>
     </ul>
     ${renderCategoryTables(rows)}

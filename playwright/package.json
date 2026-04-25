@@ -6,7 +6,10 @@
   "main": "hello.js",
   "scripts": {
     "hello": "node hello.js",
-    "exp:stealth-cityline": "node experiments/stealth-cityline/run_experiment.js"
+    "exp:stealth-cityline": "node experiments/stealth-cityline/run_experiment.js",
+    "turnstile": "node turnstile-bypass-demo.js",
+    "record": "node recorder.js",
+    "replay": "node replayer.js"
   },
   "dependencies": {
     "playwright": "^1.59.1",

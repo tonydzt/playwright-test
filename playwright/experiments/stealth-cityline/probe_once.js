@@ -27,7 +27,7 @@ if (useStealth) {
 }
 
 async function run() {
-  const launchOptions = { headless: !useHeadful, ...((recipe && recipe.launchOptions) || {}) };
+  const launchOptions = { channel: 'chrome', headless: !useHeadful, ...((recipe && recipe.launchOptions) || {}) };
   const browser = await chromium.launch(launchOptions);
   const context = await browser.newContext((recipe && recipe.contextOptions) || {});
   if (recipe && Array.isArray(recipe.initScripts)) {
@@ -36,10 +36,17 @@ async function run() {
     }
   }
   const page = await context.newPage();
-  if (recipe && recipe.cdpUserAgentOverride) {
-    const client = await context.newCDPSession(page);
+  let cdpClient = null;
+  try {
+    cdpClient = await context.newCDPSession(page);
+    await cdpClient.send('Network.enable');
+  } catch {
+    cdpClient = null;
+  }
+
+  if (recipe && recipe.cdpUserAgentOverride && cdpClient) {
     try {
-      await client.send('Network.setUserAgentOverride', recipe.cdpUserAgentOverride);
+      await cdpClient.send('Network.setUserAgentOverride', recipe.cdpUserAgentOverride);
     } catch (err) {
       const md = recipe.cdpUserAgentOverride.userAgentMetadata;
       if (!md) {
@@ -56,7 +63,7 @@ async function run() {
       if (brands.length && platform) {
         fallback.userAgentMetadata = { brands, mobile, platform };
       }
-      await client.send('Network.setUserAgentOverride', fallback);
+      await cdpClient.send('Network.setUserAgentOverride', fallback);
     }
   }
 
@@ -295,6 +302,55 @@ async function run() {
   }
 
   const result = await collectResultWithRetry();
+  async function collectTlsFingerprint() {
+    const tlsPage = await context.newPage();
+    let tlsCdpClient = null;
+    if (recipe && recipe.cdpUserAgentOverride) {
+      try {
+        tlsCdpClient = await context.newCDPSession(tlsPage);
+        await tlsCdpClient.send('Network.enable');
+        await tlsCdpClient.send('Network.setUserAgentOverride', recipe.cdpUserAgentOverride);
+      } catch {
+        tlsCdpClient = null;
+      }
+    }
+    try {
+      let response = null;
+      for (let i = 0; i < 3; i += 1) {
+        try {
+          response = await tlsPage.goto('https://tls.peet.ws/api/all', {
+            waitUntil: 'domcontentloaded',
+            timeout: 30000
+          });
+          if (response) {
+            break;
+          }
+        } catch {
+          await tlsPage.waitForTimeout(1500);
+        }
+      }
+      if (!response) {
+        return null;
+      }
+      let data = null;
+      try {
+        data = await response.json();
+      } catch {
+        const text = await tlsPage.textContent('body');
+        data = JSON.parse(text || '{}');
+      }
+      return {
+        tls: data && data.tls ? data.tls : null,
+        http2: data && data.http2 ? data.http2 : null,
+        tcpip: data && data.tcpip ? data.tcpip : null
+      };
+    } catch {
+      return null;
+    } finally {
+      await tlsPage.close();
+    }
+  }
+  const tlsFingerprint = await collectTlsFingerprint();
 
   const payload = {
     mode: (recipe && recipe.modeLabel) || (useStealth ? 'stealth' : 'baseline'),
@@ -302,6 +358,7 @@ async function run() {
     targetUrl,
     timestamp: new Date().toISOString(),
     requestHeaders: mainRequestHeaders,
+    tlsFingerprint,
     result
   };
 

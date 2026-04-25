@@ -54,6 +54,137 @@ function deepGet(obj, dottedPath) {
   }, obj);
 }
 
+function flattenLeafPaths(obj, prefix = '') {
+  if (obj === null || typeof obj !== 'object') {
+    return prefix ? [prefix] : [];
+  }
+  if (Array.isArray(obj)) {
+    return prefix ? [prefix] : [];
+  }
+  const paths = [];
+  for (const [key, value] of Object.entries(obj)) {
+    const next = prefix ? `${prefix}.${key}` : key;
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      paths.push(...flattenLeafPaths(value, next));
+    } else {
+      paths.push(next);
+    }
+  }
+  return paths;
+}
+
+function extractHttp2SentFramesStrongMap(source) {
+  const out = {};
+  const frames = source?.tlsFingerprint?.http2?.sent_frames;
+  if (!Array.isArray(frames)) {
+    return out;
+  }
+  const frame0 = frames[0] || {};
+  const frame1 = frames[1] || {};
+  const frame2 = frames[2] || {};
+  const frame2Headers = Array.isArray(frame2.headers) ? frame2.headers : [];
+  const frame2PseudoHeaders = frame2Headers.filter((h) => typeof h === 'string' && h.startsWith(':'));
+  const frame2NormalHeaders = frame2Headers.filter((h) => typeof h === 'string' && !h.startsWith(':'));
+  const normalHeaderMap = {};
+  const normalHeaderOrder = [];
+  for (const headerLine of frame2NormalHeaders) {
+    const idx = headerLine.indexOf(':');
+    if (idx <= 0) {
+      continue;
+    }
+    const k = headerLine.slice(0, idx).trim().toLowerCase();
+    const v = headerLine.slice(idx + 1).trim();
+    normalHeaderMap[k] = v;
+    normalHeaderOrder.push(k);
+  }
+  const strongHeaderKeys = [
+    'accept-encoding',
+    'accept-language',
+    'priority',
+    'sec-fetch-mode',
+    'sec-fetch-site',
+    'sec-fetch-dest',
+    'sec-fetch-user',
+    'upgrade-insecure-requests'
+  ];
+  const strongHeaderOrder = normalHeaderOrder.filter((k) => strongHeaderKeys.includes(k));
+
+  out['tlsFingerprint.http2.sent_frames.strong.frameCount'] = frames.length;
+  out['tlsFingerprint.http2.sent_frames.strong.frame0.type'] = frame0.frame_type;
+  out['tlsFingerprint.http2.sent_frames.strong.frame0.length'] = frame0.length;
+  out['tlsFingerprint.http2.sent_frames.strong.frame0.settings'] = frame0.settings;
+  out['tlsFingerprint.http2.sent_frames.strong.frame1.type'] = frame1.frame_type;
+  out['tlsFingerprint.http2.sent_frames.strong.frame1.length'] = frame1.length;
+  out['tlsFingerprint.http2.sent_frames.strong.frame1.increment'] = frame1.increment;
+  out['tlsFingerprint.http2.sent_frames.strong.frame2.type'] = frame2.frame_type;
+  out['tlsFingerprint.http2.sent_frames.strong.frame2.length'] = frame2.length;
+  out['tlsFingerprint.http2.sent_frames.strong.frame2.flags'] = frame2.flags;
+  out['tlsFingerprint.http2.sent_frames.strong.frame2.pseudoHeaders'] = frame2PseudoHeaders;
+  out['tlsFingerprint.http2.sent_frames.strong.frame2.strongHeadersOrder'] = strongHeaderOrder;
+  for (const headerKey of strongHeaderKeys) {
+    out[`tlsFingerprint.http2.sent_frames.strong.frame2.strongHeaders.${headerKey}`] = normalHeaderMap[headerKey];
+  }
+  out['tlsFingerprint.http2.sent_frames.strong.frame2.priority.weight'] = frame2.priority?.weight;
+  out['tlsFingerprint.http2.sent_frames.strong.frame2.priority.depends_on'] = frame2.priority?.depends_on;
+  out['tlsFingerprint.http2.sent_frames.strong.frame2.priority.exclusive'] = frame2.priority?.exclusive;
+  return out;
+}
+
+function extractTlsStrongMap(source) {
+  const out = {};
+  const tls = source?.tlsFingerprint?.tls || {};
+  const ciphers = Array.isArray(tls.ciphers) ? tls.ciphers : [];
+  const extensions = Array.isArray(tls.extensions) ? tls.extensions : [];
+  const nonGreaseCiphers = ciphers.filter((c) => typeof c === 'string' && !c.includes('GREASE'));
+  const extensionNames = extensions
+    .map((e) => (e && typeof e.name === 'string' ? e.name : null))
+    .filter(Boolean);
+  const extensionNamesNoGrease = extensionNames.filter((n) => !n.includes('GREASE'));
+  const sortedExtensionNamesNoGrease = [...extensionNamesNoGrease].sort();
+
+  const supportedVersionsExt = extensions.find((e) => e && typeof e.name === 'string' && e.name.includes('supported_versions'));
+  const supportedVersions = Array.isArray(supportedVersionsExt?.versions)
+    ? supportedVersionsExt.versions.filter((v) => typeof v === 'string' && !v.includes('GREASE'))
+    : [];
+
+  const supportedGroupsExt = extensions.find((e) => e && typeof e.name === 'string' && e.name.includes('supported_groups'));
+  const supportedGroups = Array.isArray(supportedGroupsExt?.supported_groups)
+    ? supportedGroupsExt.supported_groups.filter((g) => typeof g === 'string' && !g.includes('GREASE'))
+    : [];
+
+  const alpnExt = extensions.find((e) => e && typeof e.name === 'string' && e.name.includes('application_layer_protocol_negotiation'));
+  const alpnProtocols = Array.isArray(alpnExt?.protocols) ? alpnExt.protocols : [];
+
+  out['tlsFingerprint.tls.strong.ciphersWithoutGrease'] = nonGreaseCiphers;
+  out['tlsFingerprint.tls.strong.ciphersWithoutGreaseCount'] = nonGreaseCiphers.length;
+  out['tlsFingerprint.tls.strong.extensionsNamesWithoutGrease'] = sortedExtensionNamesNoGrease;
+  out['tlsFingerprint.tls.strong.extensionsNamesWithoutGreaseCount'] = sortedExtensionNamesNoGrease.length;
+  out['tlsFingerprint.tls.strong.supportedVersionsWithoutGrease'] = supportedVersions;
+  out['tlsFingerprint.tls.strong.supportedGroupsWithoutGrease'] = supportedGroups;
+  out['tlsFingerprint.tls.strong.hasECH'] = extensionNamesNoGrease.some((n) => n.includes('EncryptedClientHello'));
+  out['tlsFingerprint.tls.strong.hasALPN'] = extensionNamesNoGrease.some((n) => n.includes('application_layer_protocol_negotiation'));
+  out['tlsFingerprint.tls.strong.alpnProtocols'] = alpnProtocols;
+  return out;
+}
+
+function extractJa3DiagMap(source) {
+  const out = {};
+  const ja3 = source?.tlsFingerprint?.tls?.ja3;
+  if (typeof ja3 !== 'string' || !ja3.length) {
+    return out;
+  }
+  const parts = ja3.split(',');
+  const part = (idx) => (idx < parts.length ? parts[idx] : '');
+  const splitDash = (s) => (s ? s.split('-').filter(Boolean) : []);
+  out['tlsFingerprint.tls.ja3_diag.raw'] = ja3;
+  out['tlsFingerprint.tls.ja3_diag.version'] = part(0);
+  out['tlsFingerprint.tls.ja3_diag.ciphers_raw_order'] = splitDash(part(1));
+  out['tlsFingerprint.tls.ja3_diag.extensions_raw_order'] = splitDash(part(2));
+  out['tlsFingerprint.tls.ja3_diag.supported_groups_raw_order'] = splitDash(part(3));
+  out['tlsFingerprint.tls.ja3_diag.ec_point_formats_raw_order'] = splitDash(part(4));
+  return out;
+}
+
 function normalizeAcceptLanguageForCDP(value) {
   if (typeof value !== 'string') {
     return '';
@@ -90,6 +221,10 @@ function renderDiffIcon(isDifferent) {
   return `<span class="bool ok" title="无差异"><span class="icon">&#10003;</span>无差异</span>`;
 }
 
+function renderIgnoreIcon() {
+  return `<span class="bool ignore" title="忽略"><span class="icon">!</span>忽略</span>`;
+}
+
 function renderHtmlTable(rows) {
   const grouped = new Map();
   for (const row of rows) {
@@ -105,8 +240,16 @@ function renderHtmlTable(rows) {
       const configCell = idx === 0
         ? `<td rowspan="${list.length}" class="config-cell"><code>${escapeHtml(configItem)}</code></td>`
         : '';
+      const effectCell = r.ignored ? renderIgnoreIcon() : renderBooleanIcon(r.effectChanged, '生效', '未生效');
+      const fixedCell = r.ignored ? renderIgnoreIcon() : renderBooleanIcon(r.isFixed, '固定', '随机');
+      const headfulCell = r.ignored ? renderIgnoreIcon() : renderDiffIcon(r.headfulDiff);
+      const manualCell = r.ignored ? renderIgnoreIcon() : renderDiffIcon(r.manualDiff);
+      const recHeadlessCell = r.ignored ? renderIgnoreIcon() : renderDiffIcon(r.recommendedHeadlessManualDiff);
+      const recHeadfulCell = r.ignored ? renderIgnoreIcon() : renderDiffIcon(r.recommendedHeadfulManualDiff);
+      const recHeadlessRefreshCell = r.ignored ? renderIgnoreIcon() : renderDiffIcon(r.recommendedHeadlessRefreshManualDiff);
+      const recHeadfulRefreshCell = r.ignored ? renderIgnoreIcon() : renderDiffIcon(r.recommendedHeadfulRefreshManualDiff);
       trs.push(
-        `<tr>${configCell}<td><code>${escapeHtml(r.item)}</code></td><td><pre class="value-block">${escapeHtml(r.baseline)}</pre></td><td><pre class="value-block">${escapeHtml(r.stealth)}</pre></td><td><pre class="value-block">${escapeHtml(r.headfulStealth)}</pre></td><td><pre class="value-block">${escapeHtml(r.recommendedHeadless)}</pre></td><td><pre class="value-block">${escapeHtml(r.recommendedHeadful)}</pre></td><td><pre class="value-block">${escapeHtml(r.recommendedHeadlessRefresh)}</pre></td><td><pre class="value-block">${escapeHtml(r.recommendedHeadfulRefresh)}</pre></td><td><pre class="value-block">${escapeHtml(r.manualRef)}</pre></td><td><pre class="value-block">${escapeHtml(r.configValue)}</pre></td><td>${renderBooleanIcon(r.effectChanged, '生效', '未生效')}</td><td>${renderBooleanIcon(r.isFixed, '固定', '随机')}</td><td>${renderDiffIcon(r.headfulDiff)}</td><td>${renderDiffIcon(r.manualDiff)}</td><td>${renderDiffIcon(r.recommendedHeadlessManualDiff)}</td><td>${renderDiffIcon(r.recommendedHeadfulManualDiff)}</td><td>${renderDiffIcon(r.recommendedHeadlessRefreshManualDiff)}</td><td>${renderDiffIcon(r.recommendedHeadfulRefreshManualDiff)}</td></tr>`
+        `<tr>${configCell}<td><code>${escapeHtml(r.item)}</code></td><td><pre class="value-block">${escapeHtml(r.baseline)}</pre></td><td><pre class="value-block">${escapeHtml(r.stealth)}</pre></td><td><pre class="value-block">${escapeHtml(r.headfulStealth)}</pre></td><td><pre class="value-block">${escapeHtml(r.recommendedHeadless)}</pre></td><td><pre class="value-block">${escapeHtml(r.recommendedHeadful)}</pre></td><td><pre class="value-block">${escapeHtml(r.recommendedHeadlessRefresh)}</pre></td><td><pre class="value-block">${escapeHtml(r.recommendedHeadfulRefresh)}</pre></td><td><pre class="value-block">${escapeHtml(r.manualRef)}</pre></td><td><pre class="value-block">${escapeHtml(r.configValue)}</pre></td><td>${effectCell}</td><td>${fixedCell}</td><td>${headfulCell}</td><td>${manualCell}</td><td>${recHeadlessCell}</td><td>${recHeadfulCell}</td><td>${recHeadlessRefreshCell}</td><td>${recHeadfulRefreshCell}</td></tr>`
       );
     });
   }
@@ -147,7 +290,10 @@ function renderCategoryTables(rows) {
     { key: 'request_headers', title: 'A. Request Headers（请求头）' },
     { key: 'navigator_fingerprint', title: 'B. Navigator Fingerprint（浏览器指纹）' },
     { key: 'browser_runtime', title: 'C. Browser Runtime APIs（浏览器运行时对象）' },
-    { key: 'graphics_media', title: 'D. Graphics & Media（图形与媒体能力）' }
+    { key: 'graphics_media', title: 'D. Graphics & Media（图形与媒体能力）' },
+    { key: 'tls_tls', title: 'E. TLS Fingerprint / TLS（TLS 握手）' },
+    { key: 'tls_http2', title: 'F. TLS Fingerprint / HTTP2（HTTP2 特征）' },
+    { key: 'tls_tcpip', title: 'G. TLS Fingerprint / TCPIP（网络层特征）' }
   ];
 
   return categories
@@ -491,11 +637,69 @@ function generateReport(
   headlessSuggest,
   headfulSuggest
 ) {
+  const derivedStrongMapCache = new Map();
+  const derivedTlsStrongMapCache = new Map();
+  const derivedJa3DiagMapCache = new Map();
+  const getStrongMap = (source) => {
+    const key = source && typeof source === 'object' ? source : null;
+    if (!key) {
+      return {};
+    }
+    if (!derivedStrongMapCache.has(key)) {
+      derivedStrongMapCache.set(key, extractHttp2SentFramesStrongMap(key));
+    }
+    return derivedStrongMapCache.get(key);
+  };
+  const getTlsStrongMap = (source) => {
+    const key = source && typeof source === 'object' ? source : null;
+    if (!key) {
+      return {};
+    }
+    if (!derivedTlsStrongMapCache.has(key)) {
+      derivedTlsStrongMapCache.set(key, extractTlsStrongMap(key));
+    }
+    return derivedTlsStrongMapCache.get(key);
+  };
+  const getJa3DiagMap = (source) => {
+    const key = source && typeof source === 'object' ? source : null;
+    if (!key) {
+      return {};
+    }
+    if (!derivedJa3DiagMapCache.has(key)) {
+      derivedJa3DiagMapCache.set(key, extractJa3DiagMap(key));
+    }
+    return derivedJa3DiagMapCache.get(key);
+  };
+
+  const ignoredComparisonItems = new Set([
+    'tlsFingerprint.tcpip.src_port',
+    'tlsFingerprint.tcpip.ip.id',
+    'tlsFingerprint.tcpip.ip.ttl',
+    'tlsFingerprint.tcpip.tcp.ack',
+    'tlsFingerprint.tcpip.tcp.checksum',
+    'tlsFingerprint.tcpip.tcp.seq',
+    'tlsFingerprint.tcpip.cap_length',
+    'tlsFingerprint.tls.client_random',
+    'tlsFingerprint.tls.session_id'
+  ]);
+
   const getByPath = (source, key) => {
-    const safeSource = source || { requestHeaders: {}, result: {} };
+    const safeSource = source || { requestHeaders: {}, tlsFingerprint: {}, result: {} };
     if (key.startsWith('requestHeaders.')) {
       const headerKey = key.slice('requestHeaders.'.length);
       return safeSource.requestHeaders?.[headerKey];
+    }
+    if (key.startsWith('tlsFingerprint.http2.sent_frames.strong.')) {
+      return getStrongMap(source)[key];
+    }
+    if (key.startsWith('tlsFingerprint.tls.strong.')) {
+      return getTlsStrongMap(source)[key];
+    }
+    if (key.startsWith('tlsFingerprint.tls.ja3_diag.')) {
+      return getJa3DiagMap(source)[key];
+    }
+    if (key.startsWith('tlsFingerprint.')) {
+      return deepGet(safeSource.tlsFingerprint, key.slice('tlsFingerprint.'.length));
     }
     if (key.startsWith('result.')) {
       return deepGet(safeSource.result, key.slice('result.'.length));
@@ -522,6 +726,41 @@ function generateReport(
         category: 'request_headers'
       };
     });
+
+  const manualTlsFp = (manualBaseline && manualBaseline.tlsFingerprint) || {};
+  const tlsChecks = flattenLeafPaths(manualTlsFp.tls || {}, 'tlsFingerprint.tls').map((item) => ({
+    item,
+    configItem: 'tls.peet.ws/tls',
+    category: 'tls_tls'
+  })).filter((entry) => !['tlsFingerprint.tls.ciphers', 'tlsFingerprint.tls.extensions'].includes(entry.item));
+  const manualTlsStrongKeys = Object.keys(extractTlsStrongMap(manualBaseline || {})).sort();
+  const tlsStrongChecks = manualTlsStrongKeys.map((item) => ({
+    item,
+    configItem: 'tls.peet.ws/tls-strong',
+    category: 'tls_tls'
+  }));
+  const manualJa3DiagKeys = Object.keys(extractJa3DiagMap(manualBaseline || {})).sort();
+  const ja3DiagChecks = manualJa3DiagKeys.map((item) => ({
+    item,
+    configItem: 'tls.peet.ws/ja3-diagnostics',
+    category: 'tls_tls'
+  }));
+  const http2Checks = flattenLeafPaths(manualTlsFp.http2 || {}, 'tlsFingerprint.http2').map((item) => ({
+    item,
+    configItem: 'tls.peet.ws/http2',
+    category: 'tls_http2'
+  })).filter((entry) => entry.item !== 'tlsFingerprint.http2.sent_frames');
+  const manualHttp2StrongKeys = Object.keys(extractHttp2SentFramesStrongMap(manualBaseline || {})).sort();
+  const http2SentFramesStrongChecks = manualHttp2StrongKeys.map((item) => ({
+    item,
+    configItem: 'tls.peet.ws/http2-sent-frames(strong)',
+    category: 'tls_http2'
+  }));
+  const tcpipChecks = flattenLeafPaths(manualTlsFp.tcpip || {}, 'tlsFingerprint.tcpip').map((item) => ({
+    item,
+    configItem: 'tls.peet.ws/tcpip',
+    category: 'tls_tcpip'
+  }));
 
   const checks = [
     ...requestHeaderChecks,
@@ -562,7 +801,13 @@ function generateReport(
     { item: 'result.userAgentData.highEntropy.platform', configItem: 'client-hints/userAgentData', category: 'navigator_fingerprint' },
     { item: 'result.userAgentData.highEntropy.platformVersion', configItem: 'client-hints/userAgentData', category: 'navigator_fingerprint' },
     { item: 'result.userAgentData.highEntropy.uaFullVersion', configItem: 'client-hints/userAgentData', category: 'navigator_fingerprint' },
-    { item: 'result.userAgentData.highEntropy.wow64', configItem: 'client-hints/userAgentData', category: 'navigator_fingerprint' }
+    { item: 'result.userAgentData.highEntropy.wow64', configItem: 'client-hints/userAgentData', category: 'navigator_fingerprint' },
+    ...tlsChecks,
+    ...tlsStrongChecks,
+    ...ja3DiagChecks,
+    ...http2Checks,
+    ...http2SentFramesStrongChecks,
+    ...tcpipChecks
   ];
 
   const rows = checks.map(({ item, configItem, category }) => {
@@ -575,12 +820,13 @@ function generateReport(
     const recommendedHeadlessRefreshValue = getByPath(recommendedHeadlessRefresh, item);
     const recommendedHeadfulRefreshValue = getByPath(recommendedHeadfulRefresh, item);
     const manualValue = getByPath(
-      manualBaseline || { requestHeaders: {}, result: {} },
+      manualBaseline || { requestHeaders: {}, tlsFingerprint: {}, result: {} },
       item
     );
     return {
       item,
       category,
+      ignored: ignoredComparisonItems.has(item),
       configItem,
       baseline: formatValue(baselineValue),
       stealth: formatValue(stealthValue),
@@ -734,6 +980,11 @@ function generateReport(
       color: #9a1b2f;
       border: 1px solid #f3c2cb;
     }
+    .bool.ignore {
+      background: #fff7db;
+      color: #7a5a00;
+      border: 1px solid #f2dd8a;
+    }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
     .code-block {
       margin: 8px 0 0;
@@ -799,6 +1050,10 @@ function generateReport(
       <li>“manual差异(推荐无头/推荐有头)”用于验证应用推荐参数后的收敛效果</li>
       <li>“manual差异(推荐+刷新)”用于验证二次加载（refresh）后的收敛效果</li>
       <li>平台字段一致性规则：<code>result.platform(navigator.platform)</code> 目标值为 <code>MacIntel</code>，<code>result.userAgentData.*.platform</code> 目标值为 <code>macOS</code>（两者并存属正常）</li>
+      <li>TLS 指纹观测项来源：<code>https://tls.peet.ws/api/all</code>，并拆分为 <code>tlsFingerprint.tls.*</code>、<code>tlsFingerprint.http2.*</code>、<code>tlsFingerprint.tcpip.*</code> 三大类（按 manual 基准动态展开）</li>
+      <li><code>tlsFingerprint.tls.ciphers</code>/<code>tlsFingerprint.tls.extensions</code> 已改为强约束拆解项（去 GREASE、扩展名与关键能力），避免随机 payload 造成无意义不对齐</li>
+      <li>JA3 诊断项：<code>tlsFingerprint.tls.ja3_diag.*</code> 按原始顺序拆解 5 段，便于定位 <code>ja3/ja3_hash</code> 不一致来源</li>
+      <li><code>tlsFingerprint.http2.sent_frames</code> 已拆解为强约束子项（帧序列、SETTINGS、WINDOW_UPDATE、HEADERS 关键结构 + 强约束普通头子集）；弱约束明细不展示</li>
       <li>已纳入关键一致性监控（含 <code>language</code> vs <code>languages</code>、UA hints、window 尺寸等）</li>
     </ul>
     ${renderCategoryTables(rows)}
@@ -897,7 +1152,7 @@ function main() {
       '--reload-once',
       `--recipe=${headfulRecipePath}`,
       `--out=${path.join(resultsDir, 'stealth-recommended-headful-refresh-run-1.json')}`
-    ]);
+    ])
 
     recommendedHeadless = readJson(path.join(resultsDir, 'stealth-recommended-headless-run-1.json'));
     recommendedHeadful = readJson(path.join(resultsDir, 'stealth-recommended-headful-run-1.json'));
